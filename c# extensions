@@ -1,6 +1,6 @@
 // --------------------------------------------------------------------------------------------------------------------
 // <copyright file="CommonExtensions.cs" company="Common">
-//   Copyright None.
+//   Copyright None. Free to the world.
 // </copyright>
 // <summary>
 //   This is a Common Extensions class compiled over the course of many years
@@ -78,6 +78,21 @@ namespace Utilities
         public static string Name(this Enum value)
         {
             return value.ToString();
+        }
+        
+        /// <summary>
+        /// Gets an attribute on an enum field value
+        /// </summary>
+        /// <typeparam name="T">The type of the attribute you want to retrieve</typeparam>
+        /// <param name="enumVal">The enum value</param>
+        /// <returns>The attribute of type T that exists on the enum value</returns>
+        /// <example>string attrValue = myEnumVariable.GetAttributeOfType<AnAttribute/>().Attribute;</example>
+        public static T GetAttributeOfType<T>(this Enum enumVal) where T : System.Attribute
+        {
+            var type = enumVal.GetType();
+            var memInfo = type.GetMember(enumVal.ToString());
+            var attributes = memInfo[0].GetCustomAttributes(typeof(T), false);
+            return (attributes.Length > 0) ? (T)attributes[0] : null;
         }
     }
 
@@ -206,7 +221,7 @@ namespace Utilities
                 }
             }
 
-            return default;
+            return default(T);
         }
 
         /// <summary>
@@ -249,7 +264,7 @@ namespace Utilities
             Type enumType = typeof(T);
             if (!enumType.GetTypeInfo().IsEnum)
             {
-                return default;
+                return default(T);
             }
 
             return (T)Enum.ToObject(enumType, value);
@@ -298,26 +313,20 @@ namespace Utilities
 
         public override object ConvertTo(ITypeDescriptorContext context, CultureInfo culture, object value, Type destinationType)
         {
-            if (destinationType != typeof(string))
+            if (destinationType == typeof(string))
             {
-                return base.ConvertTo(context, culture, value, destinationType);
-            }
-
-            if (value == null)
-            {
+                if (value != null)
+                {
+                    FieldInfo fi = value.GetType().GetField(value.ToString());
+                    if (fi != null)
+                    {
+                        var attributes = (DescriptionAttribute[])fi.GetCustomAttributes(typeof(DescriptionAttribute), false);
+                        return ((attributes.Length > 0) && (!String.IsNullOrEmpty(attributes[0].Description))) ? attributes[0].Description : value.ToString();
+                    }
+                }
                 return string.Empty;
             }
-
-            var fi = value.GetType().GetField(value.ToString());
-            if (fi == null)
-            {
-                return string.Empty;
-            }
-
-            var attributes = (DescriptionAttribute[])fi.GetCustomAttributes(typeof(DescriptionAttribute), false);
-            return attributes.Length > 0 && !string.IsNullOrEmpty(attributes[0].Description) 
-                ? attributes[0].Description 
-                : value.ToString();
+            return base.ConvertTo(context, culture, value, destinationType);
         }
     }
 
@@ -354,6 +363,16 @@ namespace Utilities
         public static string Quote(this string input)
         {
             return "'" + input + "'";
+        }
+
+        /// <summary>
+        /// Removes unsafe characters using Regex
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns>String</returns>
+        public static string RemoveUnsafe(this string input)
+        {
+            return Regex.Replace(input, @"[^\w\.@-]", "", RegexOptions.None, TimeSpan.FromSeconds(1.5));
         }
 
         /// <summary>
@@ -725,6 +744,16 @@ namespace Utilities
         public static bool EqualsCi(this string value, string comparableString)
         {
             //return value.ToLowerInvariant() == comparableString.ToLowerInvariant();
+            if (value == null && comparableString == null)
+            {
+                return true;
+            }
+
+            if (value == null || comparableString == null)
+            {
+                return false;
+            }
+
             return string.Equals(value, comparableString, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -736,6 +765,88 @@ namespace Utilities
             return stringArray.Contains(value, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// A case-insensitive Equals comparison of two strings
+        /// if either or both strings are null or empty, returns true
+        /// </summary>
+        public static bool EqualsCiOrNotSet(this string value, string comparableString)
+        {
+            if (string.IsNullOrEmpty(value))
+                return true;
+
+            if (string.IsNullOrEmpty(comparableString))
+                return true;
+            
+            return string.Equals(value, comparableString, StringComparison.OrdinalIgnoreCase);
+        }
+
+        ///// <summary>
+        ///// 
+        ///// </summary>
+        ///// <param name="input"></param>
+        ///// <returns></returns>
+        //public static string ToInsecureString(this SecureString input)
+        //{
+        //    if (input == null)
+        //    {
+        //        return null;
+        //    }
+
+        //    var ptr = Marshal.SecureStringToBSTR(input);
+
+        //    try
+        //    {
+        //        return Marshal.PtrToStringBSTR(ptr);
+        //    }
+        //    finally
+        //    {
+        //        Marshal.ZeroFreeBSTR(ptr);
+        //    }
+        //}
+
+        ///// <summary>
+        ///// Converts a SecureString to a regular (unobscured) string
+        ///// </summary>
+        ///// <param name="secureString">The SecureString object to be unencrypted</param>
+        ///// <returns>the unsecured string</returns>
+        //public static string ToUnsecuredString(this SecureString secureString)
+        //{
+        //    IntPtr inputPasswordAsIntPtr = IntPtr.Zero;
+        //    try
+        //    {
+        //        inputPasswordAsIntPtr = Marshal.SecureStringToGlobalAllocUnicode(secureString);
+        //        return Marshal.PtrToStringUni(inputPasswordAsIntPtr);
+        //    }
+        //    finally
+        //    {
+        //        Marshal.ZeroFreeGlobalAllocUnicode(inputPasswordAsIntPtr);
+        //    }
+        //}
+
+        ///// <summary>
+        ///// Converts a string to a SecureString object
+        ///// </summary>
+        ///// <param name="plainString">The clear text to be secured</param>
+        ///// <returns>the new SecureString object</returns>
+        //public static SecureString ToSecureString(this string plainString)
+        //{
+        //    if (plainString == null)
+        //    {
+        //        return null;
+        //    }
+
+        //    var charArray = plainString.ToCharArray();
+
+        //    var secure = new SecureString();
+
+        //    foreach (var c in charArray)
+        //    {
+        //        secure.AppendChar(c);
+        //    }
+
+        //    secure.MakeReadOnly();
+        //    return secure;
+        //}
         public static bool TryParseIpString(this string ipText, out IpAddress ipAddressObject)
         {
             string[] parts = ipText.Split('.');
@@ -780,7 +891,6 @@ namespace Utilities
             {
                 return number.ToString();
             }
-
             long rem = number % 100;
             if (rem >= 11 && rem <= 13)
             {
@@ -1501,11 +1611,58 @@ namespace Utilities
             }
         }
 
+        public static List<string> ToLowerList(this string[] stringArray)
+        {
+            return stringArray?.Where(x => x != null).Select(s => s.ToLowerInvariant()).ToList();
+        }
+
+        public static bool SafeContains(this string[] stringArray, string value)
+        {
+            return stringArray.Select(s => s.ToLowerInvariant()).ToList().Contains(value.ToLowerInvariant());
+        }
+
+        public static ObservableCollection<T> ToObservableCollection<T>(this IEnumerable<T> data)
+        {
+            return new ObservableCollection<T>(data);
+        }
+
+        public static string ToBuiltString<T>(this List<T> currentList)
+        {
+            var sb = new StringBuilder();
+            foreach (var entry in currentList)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.ToString()))
+                {
+                    continue;
+                }
+                sb.AppendLine(entry.ToString());
+            }
+
+            return sb.ToString();
+        }
+
         public static void AddUnique<T>(this List<T> currentList, T itemToAdd)
         {
             if (!currentList.Contains(itemToAdd))
             {
                 currentList.Add(itemToAdd);
+            }
+        }
+
+        public static void AddUnique<T, U>(this Dictionary<T, U> currentList, T keyToAdd, U valueToAdd)
+        {
+            if (!currentList.ContainsKey(keyToAdd))
+            {
+                currentList.Add(keyToAdd, valueToAdd);
+            }
+        }
+
+        public static void AddRange<T>(this List<T> currentList, T[] itemsToAdd, Func<T,T> actionToRun)
+        {
+            foreach (var item in itemsToAdd)
+            {
+                var output = actionToRun(item);
+                currentList.Add(output);
             }
         }
 
@@ -1516,16 +1673,6 @@ namespace Utilities
             {
                 currentList.Remove(entry);
             }
-        }
-
-        public static List<string> ToLowerList(this string[] stringArray)
-        {
-            return stringArray.Select(s => s.ToLowerInvariant()).ToList();
-        }
-
-        public static bool SafeContains(this string[] stringArray, string value)
-        {
-            return stringArray.Select(s => s.ToLowerInvariant()).ToList().Contains(value.ToLowerInvariant());
         }
     }
 
@@ -1548,6 +1695,13 @@ namespace Utilities
         East,
         [Description("W")]
         West
+    }
+
+    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
+    public enum CoordinateUnit
+    {
+        Latitude,
+        Longitude
     }
 
     public static class IPAddressExtensions
@@ -1715,30 +1869,30 @@ namespace Utilities
     ///// <param name="description">The description shown on the dialog window</param>
     ///// <param name="initialDirectory">The initial directory displayed in the dialog</param>
     ///// <param name="isFolderSelected">out parameter. set to <c>true</c> if a folder is selected, otherwise <c>false</c></param>
-    //public static string ShowFolderBrowserDialog(string description, string initialDirectory, out bool isFolderSelected)
-    //{
-    //    var folder = ShowFolderBrowserDialog(description, initialDirectory);
-    //    isFolderSelected = !string.IsNullOrEmpty(folder);
+    public static string ShowFolderBrowserDialog(string description, string initialDirectory, out bool isFolderSelected)
+    {
+        var folder = ShowFolderBrowserDialog(description, initialDirectory);
+        isFolderSelected = !string.IsNullOrEmpty(folder);
 
-    //    return folder;
-    //}
+        return folder;
+    }
 
     ///// <summary>
     ///// Shows the folder dialog and returns the name of the selected folder
     ///// </summary>
     ///// <param name="description">The description shown on the dialog window</param>
     ///// <param name="initialDirectory">The initial directory displayed in the dialog</param>
-    //public static string ShowFolderBrowserDialog(string description, string initialDirectory)
-    //{
-    //    string folder = null;
-    //    var openFileDialog = new FolderBrowserDialog { Description = description, SelectedPath = initialDirectory, ShowNewFolderButton = false };
-    //    if (openFileDialog.ShowDialog() == DialogResult.OK)
-    //    {
-    //        folder = openFileDialog.SelectedPath;
-    //    }
+    public static string ShowFolderBrowserDialog(string description, string initialDirectory)
+    {
+        string folder = null;
+        var openFileDialog = new FolderBrowserDialog { Description = description, SelectedPath = initialDirectory, ShowNewFolderButton = false };
+        if (openFileDialog.ShowDialog() == DialogResult.OK)
+        {
+            folder = openFileDialog.SelectedPath;
+        }
 
-    //    return folder;
-    //}
+        return folder;
+    }
 
     ///// <summary>
     ///// Displays the SaveFile dialog with the specified parameters
@@ -1748,22 +1902,22 @@ namespace Utilities
     ///// <param name="filter">the filter to apply to the save dialog</param>
     ///// <param name="defaultFileName">the default file name set in the file dialog</param>
     ///// <returns>the name of the file that was saved. If file was not saved, returns null</returns>
-    //public static string ShowSaveFileDialog(string title, string initialDirectory, string filter, string defaultFileName)
-    //{
-    //    var fileDialog = new SaveFileDialog
-    //    {
-    //        Title = title,
-    //        InitialDirectory = initialDirectory,
-    //        Filter = filter,
-    //        FileName = defaultFileName
-    //    };
+    public static string ShowSaveFileDialog(string title, string initialDirectory, string filter, string defaultFileName)
+    {
+        var fileDialog = new SaveFileDialog
+        {
+            Title = title,
+            InitialDirectory = initialDirectory,
+            Filter = filter,
+            FileName = defaultFileName
+        };
 
-    //    if (fileDialog.ShowDialog() ?? false)
-    //    {
-    //        return fileDialog.FileName;
-    //    }
-    //    return null;
-    //}
+        if (fileDialog.ShowDialog() ?? false)
+        {
+            return fileDialog.FileName;
+        }
+        return null;
+    }
 
     ///// <summary>
     ///// Displays the OpenFile dialog with the specified parameters
@@ -1773,22 +1927,22 @@ namespace Utilities
     ///// <param name="filter">the filter to apply to the save dialog</param>
     ///// <param name="defaultFileName">the default file name set in the file dialog</param>
     ///// <returns>the name of the file that was opened. If file was not opened, returns null</returns>
-    //public static string ShowOpenFileDialog(string title, string initialDirectory, string filter, string defaultFileName)
-    //{
-    //    var fileDialog = new OpenFileDialog
-    //    {
-    //        Title = title,
-    //        InitialDirectory = initialDirectory,
-    //        Filter = filter,
-    //        FileName = defaultFileName
-    //    };
+    public static string ShowOpenFileDialog(string title, string initialDirectory, string filter, string defaultFileName)
+    {
+        var fileDialog = new OpenFileDialog
+        {
+            Title = title,
+            InitialDirectory = initialDirectory,
+            Filter = filter,
+            FileName = defaultFileName
+        };
 
-    //    if (fileDialog.ShowDialog() ?? false)
-    //    {
-    //        return fileDialog.FileName;
-    //    }
-    //    return null;
-    //}
+        if (fileDialog.ShowDialog() ?? false)
+        {
+            return fileDialog.FileName;
+        }
+        return null;
+    }
 
 }
 
@@ -1832,5 +1986,14 @@ namespace Utilities
             var properties = typeof(T).GetProperties();
             return properties.Select(property => new KeyValuePair<string, string>(property.Name, GetValue(src, property.Name).ToString())).ToList();
         }
+
+        public static IEnumerable<KeyValuePair<string, string>> GetPropertyValues<T>(this T src, Type attributeType, bool includePropsWithAttribute)
+        {
+            var properties = includePropsWithAttribute 
+                            ? typeof(T).GetProperties().Where(prop => Attribute.IsDefined(prop, attributeType))
+                            : typeof(T).GetProperties().Where(prop => !Attribute.IsDefined(prop, attributeType));
+            return properties.Select(property => new KeyValuePair<string, string>(property.Name, GetValue(src, property.Name).ToString())).ToList();
+        }
     }
+
 }
