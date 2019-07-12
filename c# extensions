@@ -35,11 +35,6 @@ namespace Utilities
         {
             string description = string.Empty;
 
-            if (currentEnum == null)
-            {
-                return string.Empty;
-            }
-
             Type type = currentEnum.GetType();
 
             string name = Enum.GetName(type, currentEnum);
@@ -71,7 +66,7 @@ namespace Utilities
         }
 
         /// <summary>
-        /// A shortcut to getting the string representation of the enum value
+        /// An intuitive extension to retrieve the string representation of the enum value
         /// This can be overloaded to give more meaningful representation
         /// </summary>
         /// <returns>The enum value as a string</returns>
@@ -154,6 +149,19 @@ namespace Utilities
         }
 
         /// <summary>
+        /// Converts an enum into a List of strings
+        /// </summary>
+        /// <returns>returns a list of sorted enum names</returns>
+        public static int GetCount()
+        {
+            Type enumType = typeof(T);
+
+            var keys = Enum.GetNames(enumType);
+
+            return keys.Length;
+        }
+
+        /// <summary>
         /// Converts an enum into a dictionary
         /// </summary>
         /// <returns>returns a dictionary with keys = enum values (int) and values = enum descriptions (string)</returns>
@@ -193,8 +201,9 @@ namespace Utilities
         /// Gets an enum based on the description attribute
         /// </summary>
         /// <param name="description">the description attribute of the enum</param>
+        /// <param name="fallbackValue">The value to return if unable to parse</param>
         /// <returns>the corresponding enum value</returns>
-        public static T FromDescription(string description)
+        public static T FromDescription(string description, T fallbackValue = default)
         {
             var type = typeof(T);
             if (!type.GetTypeInfo().IsEnum)
@@ -204,24 +213,24 @@ namespace Utilities
 
             foreach (FieldInfo field in type.GetFields())
             {
-                var attribute = field?.GetCustomAttribute<DescriptionAttribute>();
+                var attribute = field.GetCustomAttribute<DescriptionAttribute>();
                 if (attribute != null)
                 {
-                    if (attribute.Description == description)
+                    if (attribute.Description.ToUpper() == description.ToUpper())
                     {
                         return (T)field.GetValue(null);
                     }
                 }
                 else
                 {
-                    if (field != null && field.Name == description)
+                    if (field.Name.ToUpper() == description.ToUpper())
                     {
                         return (T)field.GetValue(null);
                     }
                 }
             }
 
-            return default(T);
+            return fallbackValue;
         }
 
         /// <summary>
@@ -232,7 +241,11 @@ namespace Utilities
         public static string ToDescription(string nameValue)
         {
             string description = string.Empty;
-            var currentEnum = (T)Enum.Parse(typeof(T), nameValue);
+            var couldParse = Enum.TryParse(nameValue, true, out T currentEnum);
+            if (!couldParse)
+            {
+                return string.Empty;
+            }
 
             Type type = currentEnum.GetType();
 
@@ -264,7 +277,13 @@ namespace Utilities
             Type enumType = typeof(T);
             if (!enumType.GetTypeInfo().IsEnum)
             {
-                return default(T);
+                return default;
+            }
+
+            var valueCount = GetCount();
+            if (value >= valueCount)
+            {
+                return default;
             }
 
             return (T)Enum.ToObject(enumType, value);
@@ -277,7 +296,24 @@ namespace Utilities
         /// <returns>the corresponding enum item</returns>
         public static T FromName(string name)
         {
+            var couldParse = Enum.TryParse(name, true, out T currentEnum);
+            if (!couldParse)
+            {
+                return default;
+            }
             return (T)Enum.Parse(typeof(T), name);
+        }
+
+        /// <summary>
+        /// Gets the Enum from its name value
+        /// </summary>
+        /// <param name="name">the name of the enum to examine</param>
+        /// <param name="fallbackValue">the fallback value to return if the value cannot be parsed</param>
+        /// <returns>the corresponding enum item</returns>
+        public static T TryFromName(string name, T fallbackValue = default(T))
+        {
+            var couldParse = Enum.TryParse(name, true, out T output);
+            return couldParse ? output : fallbackValue;
         }
 
         public static Enum[] ParseObjectToEnum(Type enumType, object value)
@@ -290,17 +326,43 @@ namespace Utilities
             var str = value as string;
             if (string.IsNullOrEmpty(str))
             {
-                throw new ArgumentException("parameter");
+                return new Enum[]{};
             }
 
             var strArray = str.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
             var enumArray = new Enum[strArray.Length];
             for (var index = 0; index < strArray.Length; ++index)
             {
-                enumArray[index] = (Enum)Enum.Parse(enumType, strArray[index], true);
+                enumArray[index] = (Enum)Enum.Parse(enumType, strArray[index].Trim(), true);
             }
 
             return enumArray;
+        }
+
+        /// <summary>
+        /// Gets the Enum from its name or description value
+        /// </summary>
+        /// <param name="fallbackValue">The value to return if unable to parse</param>
+        /// <param name="names">the name or description of the enum to examine</param>
+        /// <returns>the corresponding enum item</returns>
+        public static T FromUnknown(T fallbackValue, params string[] names)
+        {
+            foreach (var item in names)
+            {
+                var couldParse = Enum.TryParse(item, true, out T result);
+                if (couldParse)
+                {
+                    return result;
+                }
+
+                result = FromDescription(item, fallbackValue);
+                if (!result.Equals(fallbackValue))
+                {
+                    return result;
+                }
+            }
+
+            return fallbackValue;
         }
     }
 
@@ -313,20 +375,26 @@ namespace Utilities
 
         public override object ConvertTo(ITypeDescriptorContext context, CultureInfo culture, object value, Type destinationType)
         {
-            if (destinationType == typeof(string))
+            if (destinationType != typeof(string))
             {
-                if (value != null)
-                {
-                    FieldInfo fi = value.GetType().GetField(value.ToString());
-                    if (fi != null)
-                    {
-                        var attributes = (DescriptionAttribute[])fi.GetCustomAttributes(typeof(DescriptionAttribute), false);
-                        return ((attributes.Length > 0) && (!String.IsNullOrEmpty(attributes[0].Description))) ? attributes[0].Description : value.ToString();
-                    }
-                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+
+            if (value == null)
+            {
                 return string.Empty;
             }
-            return base.ConvertTo(context, culture, value, destinationType);
+
+            var fi = value.GetType().GetField(value.ToString());
+            if (fi == null)
+            {
+                return string.Empty;
+            }
+
+            var attributes = (DescriptionAttribute[])fi.GetCustomAttributes(typeof(DescriptionAttribute), false);
+            return attributes.Length > 0 && !string.IsNullOrEmpty(attributes[0].Description) 
+                ? attributes[0].Description 
+                : value.ToString();
         }
     }
 
@@ -341,7 +409,7 @@ namespace Utilities
         {
             return Regex.Replace(input, "'", "''");
         }
-
+        
         /// <summary>
         /// Replaces  / \ , and " " characters with empty string
         /// </summary>
@@ -349,10 +417,12 @@ namespace Utilities
         /// <returns>String</returns>
         public static string Clean(this string input)
         {
-            Regex.Replace(input, "/", "");
-            Regex.Replace(input, "\\\\", "");
-            Regex.Replace(input, ",", "");
-            return Regex.Replace(input, " ", "");
+            var output = Regex.Replace(input, "/", "");
+            output = output.Replace(@"\","");
+            output = Regex.Replace(output, @"\\", "");
+            output = Regex.Replace(output, ",", "");
+            output = Regex.Replace(output, @"""", "");
+            return output;
         }
 
         /// <summary>
@@ -565,7 +635,7 @@ namespace Utilities
         {
             return int.TryParse(value, out _);
         }
-
+        
         /// <summary>
         /// Returns the integer value of a string
         /// </summary>
@@ -708,8 +778,37 @@ namespace Utilities
                 return string.Empty;
             }
 
-            return value.Substring(index);
+            return value.Substring(index + 1);
         }
+
+        /// <summary>
+        /// From the specified string, finds the last occurance of the specified search character and returns the substring of the value after that location
+        /// </summary>
+        /// <param name="value">the base string to examine</param>
+        /// <param name="searchString">the character to search for within the base string</param>
+        /// <returns>If the search string is not found, the base value will be returned.
+        /// Otherwise, the substring of the base value starting at the loaction of the search string through the end of the value</returns>
+        public static string SubstringAfterLast(this string value, string searchString)
+        {
+            if (string.IsNullOrEmpty(searchString))
+            {
+                return value;
+            }
+
+            if (!value.ContainsAny(searchString))
+            {
+                return string.Empty;
+            }
+
+            var index = value.LastIndexOf(searchString, StringComparison.OrdinalIgnoreCase);
+            if (index <= 0)
+            {
+                return string.Empty;
+            }
+
+            return value.Substring(index + 1);
+        }
+
 
         /// <summary>
         /// From the specified string, finds the specified search character and returns the substring of the value up to that location
@@ -721,7 +820,7 @@ namespace Utilities
         /// Otherwise, the substring of the base value starting at the index of the firstString up to (but not including) the location of the secondString </returns>
         public static string SubstringBetween(this string value, string firstString, string secondString)
         {
-            if (string.IsNullOrEmpty(value))
+            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(firstString) || string.IsNullOrEmpty(secondString))
             {
                 return string.Empty;
             }
@@ -847,35 +946,7 @@ namespace Utilities
         //    secure.MakeReadOnly();
         //    return secure;
         //}
-        public static bool TryParseIpString(this string ipText, out IpAddress ipAddressObject)
-        {
-            string[] parts = ipText.Split('.');
 
-            byte? partA = null;
-            byte? partB = null;
-            byte? partC = null;
-            byte? partD = null;
-
-            if (parts.Length > 0 && !string.IsNullOrEmpty(parts[0]) && byte.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var outValue))
-            {
-                partA = outValue;
-            }
-            if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1]) && byte.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
-            {
-                partB = outValue;
-            }
-            if (parts.Length > 2 && !string.IsNullOrEmpty(parts[2]) && byte.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
-            {
-                partC = outValue;
-            }
-            if (parts.Length > 3 && !string.IsNullOrEmpty(parts[3]) && byte.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
-            {
-                partD = outValue;
-            }
-
-            ipAddressObject = new IpAddress(partA, partB, partC, partD);
-            return partA.HasValue && partB.HasValue && partC.HasValue && partD.HasValue;
-        }
     }
 
     public static class NumberExtensions
@@ -891,6 +962,7 @@ namespace Utilities
             {
                 return number.ToString();
             }
+
             long rem = number % 100;
             if (rem >= 11 && rem <= 13)
             {
@@ -924,7 +996,7 @@ namespace Utilities
         /// converts a number into its word representation
         /// </summary>
         /// <param name="number">the number to be converted</param>
-        /// <returns>a string corresponding to the number value. i.e. 7 => Seven or 153 => one hundred fifty three</returns>
+        /// <returns>a string corresponding to the number value. i.e. 7 => Seven or 153 => one hundred fifty-three</returns>
         public static string ToWords(this int number)
         {
             if (number == 0)
@@ -961,14 +1033,14 @@ namespace Utilities
             {
                 if (number < 20)
                 {
-                    words += UnitsMap[number];
+                    words += EnumUtilities<Ones>.FromIntValue(number).GetDescription();
                 }
                 else
                 {
-                    words += TensMap[number / 10];
+                    words += EnumUtilities<Tens>.FromIntValue(number / 10).GetDescription();
                     if ((number % 10) > 0)
                     {
-                        words += "-" + UnitsMap[number % 10];
+                        words += "-" + EnumUtilities<Ones>.FromIntValue(number % 10).GetDescription();
                     }
                 }
             }
@@ -976,8 +1048,8 @@ namespace Utilities
             return words;
         }
 
-        private static readonly string[] UnitsMap = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen" };
-        private static readonly string[] TensMap = { "zero", "ten", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety" };
+        //private static readonly string[] UnitsMap = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen" };
+        //private static readonly string[] TensMap = { "zero", "ten", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety" };
 
         /// <summary>
         /// Converts double value of radians to degrees.
@@ -1021,9 +1093,7 @@ namespace Utilities
             var firstValueRounded = Math.Round(firstValue, precision, MidpointRounding.AwayFromZero);
             var secondValueRounded = Math.Round(secondValue, precision, MidpointRounding.AwayFromZero);
 
-            double difference = Math.Abs(firstValueRounded * .00001);
-
-            return Math.Abs(firstValueRounded - secondValueRounded) <= difference;
+            return firstValueRounded == secondValueRounded;
         }
 
         /// <summary>
@@ -1053,9 +1123,7 @@ namespace Utilities
             var firstValueRounded = Math.Round(firstValue.Value, precision, MidpointRounding.AwayFromZero);
             var secondValueRounded = Math.Round(secondValue.Value, precision, MidpointRounding.AwayFromZero);
 
-            double difference = Math.Abs(firstValueRounded * .00001);
-
-            return Math.Abs(firstValueRounded - secondValueRounded) <= difference;
+            return firstValueRounded == secondValueRounded;
         }
 
         /// <summary>
@@ -1080,9 +1148,7 @@ namespace Utilities
             var firstValueRounded = Math.Round(firstValue, precision, MidpointRounding.AwayFromZero);
             var secondValueRounded = Math.Round(secondValue.Value, precision, MidpointRounding.AwayFromZero);
 
-            double difference = Math.Abs(firstValueRounded * .00001);
-
-            return Math.Abs(firstValueRounded - secondValueRounded) <= difference;
+            return firstValueRounded == secondValueRounded;
         }
 
         /// <summary>
@@ -1107,9 +1173,7 @@ namespace Utilities
             var firstValueRounded = Math.Round(firstValue.Value, precision, MidpointRounding.AwayFromZero);
             var secondValueRounded = Math.Round(secondValue, precision, MidpointRounding.AwayFromZero);
 
-            double difference = Math.Abs(firstValueRounded * .00001);
-
-            return Math.Abs(firstValueRounded - secondValueRounded) <= difference;
+            return firstValueRounded == secondValueRounded;
         }
 
         /// <summary>
@@ -1401,7 +1465,7 @@ namespace Utilities
         /// Checks to see if a date is null or has a default value
         /// </summary>
         /// <param name="input">The date to check</param>
-        /// <returns>True if the the date occurs before the the current date. Otherwise returns false</returns>
+        /// <returns>True if the the date equals DateTime.MinValue or is null. Otherwise returns false</returns>
         public static bool IsNotSet(this DateTime? input)
         {
             return IsNotSet(input, null);
@@ -1412,7 +1476,7 @@ namespace Utilities
         /// </summary>
         /// <param name="input">The date to check</param>
         /// <param name="defaultValue">an optional defaultValue other than Nothing/1-1-1753/DateTime.MinValue</param>
-        /// <returns>True if the the date occurs before the the current date. Otherwise returns false</returns>
+        /// <returns>True if the the date equals DateTime.MinValue or is null. Otherwise returns whether the value equals the defaultValue provided</returns>
         public static bool IsNotSet(this DateTime? input, DateTime? defaultValue)
         {
             if (input == null || input == DateTime.MinValue)
@@ -1458,6 +1522,10 @@ namespace Utilities
         public static DateTime EndOfQuarter(this DateTime input)
         {
             var quarter = (input.Month - 1) / 3 + 1;
+            if (quarter == 4)
+            {
+                return new DateTime(input.Year, 12,31);
+            }
             return new DateTime(input.Year, 3 * quarter + 1, 1).AddDays(-1);
         }
 
@@ -1533,11 +1601,25 @@ namespace Utilities
 
     public static class ListExtensions
     {
+        /// <summary>
+        /// Executes a contains call on the stringArray using an IgnoreCase string comparison
+        /// </summary>
+        public static bool ContainsCi(this string[] stringArray, string value)
+        {
+            return stringArray.Contains(value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Converts an enumerable to an observable collection
+        /// </summary>
         public static ObservableCollection<T> ToObservableCollection<T>(this IEnumerable<T> data)
         {
             return new ObservableCollection<T>(data);
         }
 
+        /// <summary>
+        /// Converts a list of strings to a stringCollection
+        /// </summary>
         public static StringCollection ToCollection(this List<string> listOfString)
         {
             var collection = new StringCollection();
@@ -1549,11 +1631,17 @@ namespace Utilities
             return collection;
         }
 
+        /// <summary>
+        /// Converts a stringCollection to a list of string
+        /// </summary>
         public static List<string> ToList(this StringCollection collection)
         {
             return collection.Cast<string>().ToList();
         }
 
+        /// <summary>
+        /// Converts a list to a concatenated string
+        /// </summary>
         public static string ToBuiltString<T>(this List<T> currentList)
         {
             var sb = new StringBuilder();
@@ -1569,6 +1657,39 @@ namespace Utilities
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Converts a dictionary to a concatenated string
+        /// </summary>
+        public static string ToBuiltString<T,TU>(this Dictionary<T,TU> currentList)
+        {
+            var sb = new StringBuilder();
+            foreach (var entry in currentList)
+            {
+                if (string.IsNullOrEmpty(entry.Key?.ToString()) || string.IsNullOrEmpty(entry.Value?.ToString()))
+                {
+                    continue;
+                }
+
+                sb.AppendLine($"{entry.Key}: {entry.Value}");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Merges two dictionaries to have all unique entries
+        /// </summary>
+        public static void MergeUnique<T,U>(this Dictionary<T,U> currentList, Dictionary<T,U> listToMerge)
+        {
+            foreach (var entry in listToMerge.Where(entry => currentList.All(x => x.Key.ToString() != entry.Key.ToString())))
+            {
+                currentList.Add(entry.Key, entry.Value);
+            }
+        }
+
+        /// <summary>
+        /// Merges two Lists to have all unique entries 
+        /// </summary>
         public static void MergeUnique<T>(this List<T> currentList, List<T> listToMerge)
         {
             foreach (var entry in listToMerge.Where(entry => !currentList.Contains(entry)))
@@ -1595,6 +1716,9 @@ namespace Utilities
             }
         }
 
+        /// <summary>
+        /// Merges a list of values into a observableCollection of values
+        /// </summary>
         public static void MergeUnique<T>(this ObservableCollection<T> currentList, List<T> listToMerge)
         {
             foreach (var entry in listToMerge.Where(entry => !currentList.Contains(entry)))
@@ -1603,6 +1727,9 @@ namespace Utilities
             }
         }
 
+        /// <summary>
+        /// Merges two ObservableCollections to have all unique entries 
+        /// </summary>
         public static void MergeUnique<T>(this ObservableCollection<T> currentList, ObservableCollection<T> listToMerge)
         {
             foreach (var entry in listToMerge.Where(entry => !currentList.Contains(entry)))
@@ -1611,36 +1738,12 @@ namespace Utilities
             }
         }
 
-        public static List<string> ToLowerList(this string[] stringArray)
-        {
-            return stringArray?.Where(x => x != null).Select(s => s.ToLowerInvariant()).ToList();
-        }
-
-        public static bool SafeContains(this string[] stringArray, string value)
-        {
-            return stringArray.Select(s => s.ToLowerInvariant()).ToList().Contains(value.ToLowerInvariant());
-        }
-
-        public static ObservableCollection<T> ToObservableCollection<T>(this IEnumerable<T> data)
-        {
-            return new ObservableCollection<T>(data);
-        }
-
-        public static string ToBuiltString<T>(this List<T> currentList)
-        {
-            var sb = new StringBuilder();
-            foreach (var entry in currentList)
-            {
-                if (entry == null || string.IsNullOrWhiteSpace(entry.ToString()))
-                {
-                    continue;
-                }
-                sb.AppendLine(entry.ToString());
-            }
-
-            return sb.ToString();
-        }
-
+        /// <summary>
+        /// Adds an item to a list, if the list does not already contain the value
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="currentList"></param>
+        /// <param name="itemToAdd"></param>
         public static void AddUnique<T>(this List<T> currentList, T itemToAdd)
         {
             if (!currentList.Contains(itemToAdd))
@@ -1649,6 +1752,9 @@ namespace Utilities
             }
         }
 
+        /// <summary>
+        /// Adds an item to a dictionary, if the dictionary does not already contain the key value
+        /// </summary>
         public static void AddUnique<T, U>(this Dictionary<T, U> currentList, T keyToAdd, U valueToAdd)
         {
             if (!currentList.ContainsKey(keyToAdd))
@@ -1657,6 +1763,66 @@ namespace Utilities
             }
         }
 
+
+
+        /// <summary>
+        /// Removes items from an observable collection that don't exist in the guide list
+        /// </summary>
+        public static void RemoveOutliers<T>(this ObservableCollection<T> currentList, List<T> listToUseAsGuide)
+        {
+            var except = currentList.Except(listToUseAsGuide).ToList();
+            foreach (var entry in except)
+            {
+                currentList.Remove(entry);
+            }
+        }
+
+        /// <summary>
+        /// Converts a string array into a list<string> with all lowercase values</string>
+        /// </summary>
+        public static List<string> ToLowerList(this string[] stringArray)
+        {
+            return stringArray.Select(s => s.ToLowerInvariant()).ToList();
+        }
+
+        /// <summary>
+        /// Checks to see if a string array contains the value (case insensitive)
+        /// </summary>
+        public static bool SafeContains(this string[] stringArray, string value)
+        {
+            return stringArray.Select(s => s.ToLowerInvariant()).ToList().Contains(value.ToLowerInvariant());
+        }
+        
+        /// <summary>
+        /// Groups a list based on a filter function
+        /// Calculates the counts of each group
+        /// Returns the highest count of all groups
+        /// </summary>
+        public static int MaxCountInGroup<T,U>(this List<T> listOfItems, Func<T, U> filterFunc)
+        {
+            if (listOfItems == null || !listOfItems.Any())
+            {
+                return 0;
+            }
+
+            var count = listOfItems
+                       .GroupBy(filterFunc)
+                       .Max(g => g.Count());
+            return count;
+        }
+
+        /// <summary>
+        /// Adds an item to a newly created list
+        /// </summary>
+        public static List<T> ToNewList<T>(this T singleItem)
+        {
+            return new List<T> {singleItem};
+        }
+
+
+        /// <summary>
+        /// Adds all values of an array to the existing list
+        /// </summary>
         public static void AddRange<T>(this List<T> currentList, T[] itemsToAdd, Func<T,T> actionToRun)
         {
             foreach (var item in itemsToAdd)
@@ -1666,46 +1832,87 @@ namespace Utilities
             }
         }
 
-        public static void RemoveOutliers<T>(this ObservableCollection<T> currentList, List<T> listToUseAsGuide)
+        /// <summary>
+        /// Adds all values of a dictionary to the existing dictionary
+        /// </summary>
+        public static void AddRange<T,U>(this Dictionary<T, U> existing, Dictionary<T,U> newValues)
         {
-            var except = currentList.Except(listToUseAsGuide);
-            foreach (var entry in except)
+            foreach (var value in newValues)
             {
-                currentList.Remove(entry);
+                existing.Add(value.Key, value.Value);
             }
         }
     }
 
-    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
-    public enum DurationUnit
+    public static class ParseExtensions
     {
-        Days,
-        Weeks,
-        Months,
+        public static bool ToBool(this object value, bool fallbackValue)
+        {
+            if (value == null)
+            {
+                return fallbackValue;
+            }
+
+            var couldParse = bool.TryParse(value.ToString(), out bool boolValue);
+            return couldParse ? boolValue : fallbackValue;
+        }
+
+        public static T ToEnum<T>(this string value, T fallbackValue) where T : struct
+        {
+            if (value == null)
+            {
+                return fallbackValue;
+            }
+
+            var couldParse = Enum.TryParse(value, true, out T enumValue);
+            return couldParse ? enumValue : fallbackValue;
+        }
+
+        public static double ToDouble(this object value, double fallbackValue)
+        {
+            if (value == null)
+            {
+                return fallbackValue;
+            }
+
+            var couldParse = double.TryParse(value.ToString(), out double doubleValue);
+            return couldParse ? doubleValue : fallbackValue;
+        }
     }
 
-    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
-    public enum Direction
-    {
-        [Description("N")]
-        North,
-        [Description("S")]
-        South,
-        [Description("E")]
-        East,
-        [Description("W")]
-        West
-    }
 
-    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
-    public enum CoordinateUnit
+    public static class IpAddressExtensions
     {
-        Latitude,
-        Longitude
-    }
+        public static bool TryParseIpString(this string ipText, out IpAddress ipAddressObject)
+        {
+            string[] parts = ipText.Split('.');
 
-    public static class IPAddressExtensions
-    {
+            byte? partA = null;
+            byte? partB = null;
+            byte? partC = null;
+            byte? partD = null;
+
+            if (parts.Length > 0 && !String.IsNullOrEmpty(parts[0]) && Byte.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var outValue))
+            {
+                partA = outValue;
+            }
+            if (parts.Length > 1 && !String.IsNullOrEmpty(parts[1]) && Byte.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
+            {
+                partB = outValue;
+            }
+            if (parts.Length > 2 && !String.IsNullOrEmpty(parts[2]) && Byte.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
+            {
+                partC = outValue;
+            }
+            if (parts.Length > 3 && !String.IsNullOrEmpty(parts[3]) && Byte.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out outValue))
+            {
+                partD = outValue;
+            }
+
+            ipAddressObject = new IpAddress(partA, partB, partC, partD);
+            return partA.HasValue && partB.HasValue && partC.HasValue && partD.HasValue;
+        }
+
         public static IPAddress GetBroadcastAddress(this IpAddress address, IPAddress subnetMask)
         {
             return GetBroadcastAddress(address.ToSystemIpAddress(), subnetMask);
@@ -1736,7 +1943,7 @@ namespace Utilities
         public static bool IsInSameSubnet(this IpAddress address2, IpAddress address)
         {
             var mask = IPAddress.Parse("255.255.255.0");
-            return IsInSameSubnet(address2.ToSystemIpAddress(), address.ToSystemIpAddress(), mask);
+            return address2 == null || address.IpFullString == "..." || (IsInSameSubnet(address2.ToSystemIpAddress(), address.ToSystemIpAddress(), mask));
         }
 
         public static IPAddress GetBroadcastAddress(this IPAddress address, IPAddress subnetMask)
@@ -1757,6 +1964,11 @@ namespace Utilities
 
         public static IPAddress GetNetworkAddress(this IPAddress address, IPAddress subnetMask)
         {
+            if (address == null || subnetMask == null)
+            {
+                return null;
+            }
+
             byte[] ipAdressBytes = address.GetAddressBytes();
             byte[] subnetMaskBytes = subnetMask.GetAddressBytes();
 
@@ -1773,6 +1985,11 @@ namespace Utilities
 
         public static bool IsInSameSubnet(this IPAddress address2, IPAddress address, IPAddress subnetMask)
         {
+            if (address2 == null || address == null || subnetMask == null)
+            {
+                return false;
+
+            }
             IPAddress network1 = address.GetNetworkAddress(subnetMask);
             IPAddress network2 = address2.GetNetworkAddress(subnetMask);
 
@@ -1995,5 +2212,224 @@ namespace Utilities
             return properties.Select(property => new KeyValuePair<string, string>(property.Name, GetValue(src, property.Name).ToString())).ToList();
         }
     }
+
+    public class AssemblyInfo
+    {
+        // The assembly information values.
+        public string Title { get; }
+        public string Description { get; }
+        public string Company { get; }
+        public string Product { get; }
+        public string Copyright { get; }
+        public string Trademark { get; }
+        public string AssemblyVersion { get; }
+        public string FileVersion { get; }
+        public string Guid1 { get; }
+        public string NeutralLanguage { get; }
+        public bool IsComVisible { get; }
+
+        public AssemblyInfo() : this(Assembly.GetExecutingAssembly())
+        {
+
+        }
+
+        public AssemblyInfo(Assembly assembly)
+        {
+            // Load values from the assembly.
+            var titleAttr = GetAssemblyAttribute<AssemblyTitleAttribute>(assembly);
+            Title = titleAttr?.Title ?? string.Empty;
+
+            var assemblyAttr = GetAssemblyAttribute<AssemblyDescriptionAttribute>(assembly);
+            Description = assemblyAttr?.Description ?? string.Empty;
+
+            var companyAttr = GetAssemblyAttribute<AssemblyCompanyAttribute>(assembly);
+            Company = companyAttr?.Company ?? string.Empty;
+
+            var productAttr = GetAssemblyAttribute<AssemblyProductAttribute>(assembly);
+            Product = productAttr?.Product ?? string.Empty;
+
+            var copyrightAttr = GetAssemblyAttribute<AssemblyCopyrightAttribute>(assembly);
+            Copyright = copyrightAttr?.Copyright ?? string.Empty;
+
+            var trademarkAttr = GetAssemblyAttribute<AssemblyTrademarkAttribute>(assembly);
+            Trademark = trademarkAttr?.Trademark ?? string.Empty;
+
+            AssemblyVersion = assembly.GetName().Version.ToString();
+
+            var fileVersionAttr = GetAssemblyAttribute<AssemblyFileVersionAttribute>(assembly);
+            FileVersion = fileVersionAttr?.Version ?? string.Empty;
+
+            var guidAttr = GetAssemblyAttribute<GuidAttribute>(assembly);
+            Guid1 = guidAttr?.Value ?? string.Empty;
+
+            var languageAttr = GetAssemblyAttribute<NeutralResourcesLanguageAttribute>(assembly);
+            NeutralLanguage = languageAttr?.CultureName ?? string.Empty;
+
+            var comAttr = GetAssemblyAttribute<ComVisibleAttribute>(assembly);
+            IsComVisible = comAttr?.Value ?? false;
+        }
+
+        public static T GetAssemblyAttribute<T>(Assembly assembly) where T : Attribute
+        {
+            // Get attributes of this type.
+            var attributes = assembly.GetCustomAttributes(typeof(T), true);
+
+            // If we didn't get anything, return null.
+            if (attributes.Length == 0)
+                return null;
+
+            // Convert the first attribute value into the desired type and return it.
+            return (T)attributes[0];
+        }
+    }
+
+    public enum Greek
+    {
+        [Description("alp")]
+        Alpha,
+        [Description("bet")]
+        Beta,
+        [Description("gam")]
+        Gamma,
+        [Description("del")]
+        Delta,
+        [Description("eps")]
+        Epsilon,
+        [Description("zet")]
+        Zeta,
+        [Description("eta")]
+        Eta,
+        [Description("the")]
+        Theta,
+        [Description("iot")]
+        Iota,
+        [Description("kap")]
+        Kappa,
+        [Description("lam")]
+        Lambda,
+        [Description("mu")]
+        Mu,
+        [Description("nu")]
+        Nu,
+        [Description("xi")]
+        Xi,
+        [Description("omi")]
+        Omicron,
+        [Description("pi")]
+        Pi,
+        [Description("rho")]
+        Rho,
+        [Description("sig")]
+        Sigma,
+        [Description("tau")]
+        Tau,
+        [Description("ups")]
+        Upsilon,
+        [Description("phi")]
+        Phi,
+        [Description("chi")]
+        Chi,
+        [Description("psi")]
+        Psi,
+        [Description("ome")]
+        Omega
+    }
+
+    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
+    public enum DurationUnit
+    {
+        Days,
+        Weeks,
+        Months,
+    }
+
+    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
+    public enum Direction
+    {
+        [Description("N")]
+        North,
+        [Description("S")]
+        South,
+        [Description("E")]
+        East,
+        [Description("W")]
+        West
+    }
+
+    [TypeConverter(typeof(EnumDescriptionTypeConverter))]
+    public enum CoordinateUnit
+    {
+        Latitude,
+        Longitude
+    }
+
+    public enum Ones
+    {
+        [Description("zero")]
+        Zero,
+        [Description("one")]
+        One,
+        [Description("two")]
+        Two,
+        [Description("three")]
+        Three,
+        [Description("four")]
+        Four,
+        [Description("five")]
+        Five,
+        [Description("six")]
+        Six,
+        [Description("seven")]
+        Seven,
+        [Description("eight")]
+        Eight,
+        [Description("nine")]
+        Nine,
+        [Description("ten")]
+        Ten,
+        [Description("eleven")]
+        Eleven,
+        [Description("twelve")]
+        Twelve,
+        [Description("thirteen")]
+        Thirteen,
+        [Description("fourteen")]
+        Fourteen,
+        [Description("fifteen")]
+        Fifteen,
+        [Description("sixteen")]
+        Sixteen,
+        [Description("seventeen")]
+        Seventeen,
+        [Description("eighteen")]
+        Eighteen,
+        [Description("nineteen")]
+        Nineteen
+    }
+
+    public enum Tens
+    {
+        [Description("zero")]
+        Zero,
+        [Description("ten")]
+        Ten,
+        [Description("twenty")]
+        Twenty,
+        [Description("thirty")]
+        Thirty,
+        [Description("forty")]
+        Forty,
+        [Description("fifty")]
+        Fifty,
+        [Description("sixty")]
+        Sixty,
+        [Description("seventy")]
+        Seventy,
+        [Description("eighty")]
+        Eighty,
+        [Description("ninety")]
+        Ninety
+    }
+
 
 }
